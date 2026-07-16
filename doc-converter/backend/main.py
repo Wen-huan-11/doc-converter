@@ -5,9 +5,13 @@
 
 import os
 import uuid
+import secrets
 import asyncio
 import subprocess
 import shutil
+import logging
+
+logger = logging.getLogger("doc-converter")
 from pathlib import Path
 from datetime import datetime
 from typing import Optional
@@ -90,7 +94,7 @@ async def convert(
         if not file.filename:
             continue
 
-        task_id = str(uuid.uuid4())[:8]
+        task_id = secrets.token_urlsafe(16)
         ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else ""
 
         # Save uploaded file
@@ -301,13 +305,13 @@ async def run_conversion(task_id: str):
 
     except Exception as e:
         task["status"] = "error"
-        task["message"] = str(e)
+        task["message"] = "转换失败，请重试"
         task["percent"] = 0
-        print(f"Task {task_id} error: {e}")
+        logger.error(f"Task {task_id} error: {e}", exc_info=True)
 
 
 # ---- Startup ----
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8001, reload=True)
+    uvicorn.run("main:app", host="127.0.0.1", port=8001, reload=True)
