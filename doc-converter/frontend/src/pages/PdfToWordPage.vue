@@ -5,14 +5,16 @@ import ConvertSettings from '@/components/settings/ConvertSettings.vue'
 import ConvertButton from '@/components/common/ConvertButton.vue'
 import type { TaskInfo } from '@/api'
 import { getDownloadUrl } from '@/api'
+import { useTaskStore } from '@/stores/task-store'
 
 const settingsRef = ref<InstanceType<typeof ConvertSettings>>()
-const completedTasks = ref<TaskInfo[]>([])
 const errorMessage = ref('')
 const showError = ref(false)
+const completedTasks = ref<TaskInfo[]>([])
+const taskStore = useTaskStore()
 
-function onProgress(info: TaskInfo) {
-  // nothing extra needed — task store handles it
+function onProgress(_info: TaskInfo) {
+  // Task store is updated by ConvertButton
 }
 
 function onComplete(info: TaskInfo) {
@@ -22,11 +24,14 @@ function onComplete(info: TaskInfo) {
 function onError(msg: string) {
   errorMessage.value = msg
   showError.value = true
-  setTimeout(() => { showError.value = false }, 5000)
 }
 
 function downloadFile(taskId: string) {
   window.open(getDownloadUrl(taskId), '_blank')
+}
+
+function dismissError() {
+  showError.value = false
 }
 </script>
 
@@ -36,10 +41,21 @@ function downloadFile(taskId: string) {
     <p class="page-desc">将 PDF 文件转换为可编辑的 Word 文档（.docx）</p>
 
     <!-- Error alert -->
-    <div v-if="showError" class="error-alert">{{ errorMessage }}</div>
+    <div v-if="showError" class="error-alert">
+      <span>转换失败：{{ errorMessage }}</span>
+      <button class="error-close" @click="dismissError">✕</button>
+    </div>
 
     <!-- File table -->
     <FileTable />
+
+    <!-- Progress indicator -->
+    <div v-if="taskStore.isConverting" class="progress-bar-wrap">
+      <div class="progress-bar">
+        <div class="progress-fill" :style="{ width: Math.max(...Array.from(taskStore.tasks.values()).map(t => t.percent), 0) + '%' }"></div>
+      </div>
+      <span class="progress-text">转换中...</span>
+    </div>
 
     <!-- Settings area -->
     <div class="section-gap">
@@ -61,7 +77,8 @@ function downloadFile(taskId: string) {
     <div v-if="completedTasks.length > 0" class="completed-section">
       <h4>转换完成</h4>
       <div v-for="task in completedTasks" :key="task.task_id" class="completed-item">
-        <span>{{ task.file_name }}</span>
+        <span class="completed-name">{{ task.file_name }}</span>
+        <span class="completed-status">已完成</span>
         <button class="download-link" @click="downloadFile(task.task_id)">下载</button>
       </div>
     </div>
@@ -94,6 +111,46 @@ function downloadFile(taskId: string) {
   padding: 10px 16px;
   margin-bottom: 16px;
   font-size: 13px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.error-close {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #e04040;
+  font-size: 16px;
+}
+
+.progress-bar-wrap {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.progress-bar {
+  flex: 1;
+  height: 6px;
+  background: #e8e8ee;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: var(--primary);
+  border-radius: 3px;
+  transition: width 0.3s;
+  min-width: 2%;
+}
+
+.progress-text {
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
 }
 
 .section-gap {
@@ -122,17 +179,27 @@ function downloadFile(taskId: string) {
 
 .completed-item {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  gap: 12px;
   padding: 6px 0;
   font-size: 13px;
+}
+
+.completed-name {
+  flex: 1;
+}
+
+.completed-status {
+  color: #2a8a2a;
+  font-size: 12px;
+  font-weight: 500;
 }
 
 .download-link {
   background: var(--primary);
   color: #fff;
   border: none;
-  padding: 4px 14px;
+  padding: 6px 16px;
   border-radius: var(--radius-sm);
   cursor: pointer;
   font-size: 12px;

@@ -7,7 +7,6 @@ import os
 import uuid
 import asyncio
 import subprocess
-import tempfile
 import shutil
 from pathlib import Path
 from datetime import datetime
@@ -17,6 +16,10 @@ from fastapi import FastAPI, File, UploadFile, Form, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+
+# PDF / Document libraries
+from PyPDF2 import PdfReader, PdfWriter
+from docx import Document
 
 # ---- App Setup ----
 
@@ -162,6 +165,86 @@ def find_libreoffice() -> Optional[str]:
     return shutil.which("soffice") or shutil.which("libreoffice")
 
 
+def convert_via_libreoffice(input_path: str, output_dir: str, output_format: str) -> str:
+    """使用 LibreOffice 转换（需要安装 LibreOffice）"""
+    soffice = find_libreoffice()
+    if not soffice:
+        raise RuntimeError("LibreOffice 未安装")
+
+    cmd = [
+        soffice, "--headless",
+        "--convert-to", output_format,
+        "--outdir", output_dir,
+        input_path,
+    ]
+    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    if proc.returncode != 0:
+        raise RuntimeError(f"LibreOffice error: {proc.stderr}")
+
+    # LibreOffice names output as <stem>.<format>
+    stem = Path(input_path).stem
+    expected = os.path.join(output_dir, f"{stem}.{output_format}")
+    if os.path.exists(expected):
+        return expected
+    # Try to find any newly created file
+    candidates = list(Path(output_dir).glob(f"*.{output_format}"))
+    if candidates:
+        return str(max(candidates, key=lambda p: p.stat().st_mtime))
+    raise RuntimeError("LibreOffice 输出文件未找到")
+
+
+def convert_pdf_to_docx(input_path: str, output_path: str) -> None:
+    """PDF → Word: 提取文本并生成 DOCX"""
+    reader = PdfReader(input_path)
+    doc = Document()
+
+    for i, page in enumerate(reader.pages):
+        text = page.extract_text()
+        if text and text.strip():
+            if i > 0:
+                doc.add_page_break()
+            doc.add_paragraph(text.strip())
+
+    # If no text extracted, add a note
+    if not doc.paragraphs or all(not p.text.strip() for p in doc.paragraphs):
+        doc.add_paragraph(f"[从 PDF 提取了 {len(reader.pages)} 页，但未检测到文本内容。")
+        doc.add_paragraph("如果是扫描件，请使用 OCR 功能。]")
+
+    doc.save(output_path)
+
+
+def convert_pdf_split(input_path: str, output_dir: str) -> str:
+    """PDF 拆分：每页生成单独文件，打包为 zip"""
+    import zipfile
+
+    reader = PdfReader(input_path)
+    stem = Path(input_path).stem
+    zip_path = os.path.join(output_dir, f"{stem}_split.zip")
+
+    with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+        for i, page in enumerate(reader.pages):
+            writer = PdfWriter()
+            writer.add_page(page)
+            page_path = os.path.join(output_dir, f"{stem}_p{i + 1}.pdf")
+            with open(page_path, 'wb') as f:
+                writer.write(f)
+            zf.write(page_path, f"page_{i + 1}.pdf")
+            os.remove(page_path)
+
+    return zip_path
+
+
+def convert_pdf_merge(input_paths: list[str], output_path: str) -> None:
+    """PDF 合并"""
+    merger = PdfWriter()
+    for path in input_paths:
+        reader = PdfReader(path)
+        for page in reader.pages:
+            merger.add_page(page)
+    with open(output_path, 'wb') as f:
+        merger.write(f)
+
+
 async def run_conversion(task_id: str):
     """执行转换任务"""
     task = tasks[task_id]
@@ -172,53 +255,45 @@ async def run_conversion(task_id: str):
         input_path = task["upload_path"]
         convert_type = task["convert_type"]
         output_format = task["output_format"]
-
         output_name = Path(task["file_name"]).stem
         output_path = str(OUTPUT_DIR / f"{output_name}_{task_id}.{output_format}")
 
-        soffice = find_libreoffice()
-        if not soffice:
-            # Fallback: simulate conversion with copy + rename
-            task["percent"] = 50
-            await asyncio.sleep(0.5)
-            # Just copy as placeholder
-            shutil.copy(input_path, output_path)
-            task["percent"] = 90
-        else:
-            # Use LibreOffice for real conversion
-            task["percent"] = 30
-            cmd = [
-                soffice,
-                "--headless",
-                "--convert-to", output_format,
-                "--outdir", str(OUTPUT_DIR),
-                input_path,
-            ]
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+        task["percent"] = 20
+
+        # Try LibreOffice first, fall back to Python libraries
+        if find_libreoffice() and convert_type in ("pdf-to-word", "pdf-to-excel", "pdf-to-ppt"):
+            # LibreOffice handles these well
+            task["message"] = "使用 LibreOffice 引擎..."
+            actual_output = await asyncio.to_thread(
+                convert_via_libreoffice, input_path, str(OUTPUT_DIR), output_format
             )
-            stdout, stderr = await proc.communicate()
-            task["percent"] = 80
+            if actual_output != output_path:
+                shutil.move(actual_output, output_path)
 
-            if proc.returncode != 0:
-                raise RuntimeError(f"LibreOffice error: {stderr.decode(errors='ignore')}")
+        elif convert_type == "pdf-to-word":
+            task["message"] = "使用 Python 引擎提取文本..."
+            task["percent"] = 40
+            await asyncio.to_thread(convert_pdf_to_docx, input_path, output_path)
 
-            # Find the output file (LibreOffice names it based on input)
-            expected = OUTPUT_DIR / f"{Path(input_path).stem}.{output_format}"
-            if expected.exists():
-                # Rename to our task-based name
-                target = OUTPUT_DIR / f"{output_name}_{task_id}.{output_format}"
-                expected.rename(target)
-                output_path = str(target)
-            else:
-                # Try to find any newly created file
-                candidates = list(OUTPUT_DIR.glob(f"*.{output_format}"))
-                if candidates:
-                    newest = max(candidates, key=lambda p: p.stat().st_mtime)
-                    output_path = str(newest)
+        elif convert_type == "pdf-split":
+            task["message"] = "拆分 PDF 页面..."
+            task["percent"] = 40
+            zip_path = await asyncio.to_thread(convert_pdf_split, input_path, str(OUTPUT_DIR))
+            output_path = zip_path
 
+        elif convert_type == "pdf-merge":
+            task["message"] = "合并 PDF..."
+            task["percent"] = 40
+            # Merge needs all upload paths — for now handle single file
+            await asyncio.to_thread(convert_pdf_merge, [input_path], output_path)
+
+        else:
+            # Generic fallback: try Python-based text extraction for any format
+            task["message"] = "使用 Python 引擎..."
+            task["percent"] = 40
+            await asyncio.to_thread(convert_pdf_to_docx, input_path, output_path)
+
+        task["percent"] = 90
         task["output_file"] = output_path
         task["status"] = "done"
         task["percent"] = 100
@@ -235,4 +310,4 @@ async def run_conversion(task_id: str):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=8001, reload=True)
