@@ -1,0 +1,18 @@
+node_modules/
+dist/
+out/
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+*.log
+.DS_Store
+Thumbs.db
+
+# Backend
+backend/uploads/
+backend/outputs/
+
+# Electron artifacts (deprecated)
+.vite/

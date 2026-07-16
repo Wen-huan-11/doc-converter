@@ -1,0 +1,43 @@
+:root {
+  /* WPS brand colors */
+  --wps-purple: #7b5cf0;
+  --wps-purple-light: #9b7ef8;
+  --wps-purple-dark: #6344d6;
+
+  /* Primary / accent */
+  --primary: #4a6cf7;
+  --primary-light: #6b87f9;
+  --primary-dark: #3451d2;
+
+  /* Navigation */
+  --nav-bg: #1e1e2d;
+  --nav-bg-hover: #28283c;
+  --nav-bg-active: #2a2a40;
+  --nav-text: #a0a0b8;
+  --nav-text-active: #ffffff;
+  --nav-accent: #4a6cf7;
+  --nav-group-title: #6e6e8a;
+
+  /* Main area */
+  --main-bg: #ffffff;
+  --border-color: #e8e8ee;
+  --border-light: #f0f0f5;
+
+  /* Text */
+  --text-primary: #1a1a2e;
+  --text-secondary: #6e6e8a;
+  --text-muted: #a0a0b8;
+
+  /* Spacing */
+  --sidebar-width: 240px;
+  --header-height: 0px; /* no top header bar */
+
+  /* Radius */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+
+  /* Shadow */
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+}

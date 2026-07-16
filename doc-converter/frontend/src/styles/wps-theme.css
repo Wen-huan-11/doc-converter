@@ -1,0 +1,62 @@
+/* WPS-style overrides for Element Plus */
+
+/* Sidebar nav resets */
+.side-nav {
+  user-select: none;
+}
+
+/* Element Plus button overrides */
+.el-button--primary {
+  --el-button-bg-color: var(--primary);
+  --el-button-border-color: var(--primary);
+  --el-button-hover-bg-color: var(--primary-light);
+  --el-button-hover-border-color: var(--primary-light);
+  --el-button-active-bg-color: var(--primary-dark);
+}
+
+/* Card overrides */
+.el-card {
+  border-radius: var(--radius-md) !important;
+  border-color: var(--border-color) !important;
+}
+
+/* Table overrides */
+.el-table {
+  --el-table-border-color: var(--border-light);
+  --el-table-header-bg-color: #fafafc;
+  font-size: 13px;
+}
+
+.el-table th.el-table__cell {
+  background-color: #fafafc;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+/* Dialog overrides */
+.el-dialog {
+  border-radius: var(--radius-lg);
+}
+
+.el-dialog__header {
+  border-bottom: 1px solid var(--border-color);
+  padding: 16px 20px;
+  margin-right: 0;
+}
+
+.el-dialog__body {
+  padding: 20px;
+}
+
+/* Menu override */
+.el-menu {
+  border-right: none !important;
+}
+
+/* Select / Input overrides */
+.el-input__wrapper {
+  border-radius: var(--radius-sm);
+}
+.el-select .el-input__wrapper {
+  border-radius: var(--radius-sm);
+}
