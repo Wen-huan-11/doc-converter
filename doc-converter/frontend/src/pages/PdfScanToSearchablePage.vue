@@ -1,11 +1,32 @@
 <script setup lang="ts">
+import FileTable from '@/components/files/FileTable.vue'
 </script>
 
 <template>
   <div class="convert-page">
     <h2 class="page-title">转扫描型 PDF</h2>
-    <p class="page-desc">对扫描件/图片进行 OCR 识别，生成可搜索的 PDF</p>
-    <div class="placeholder-area"><p>文件列表和转换设置区域 — 后续阶段实现</p></div>
+    <p class="page-desc">对扫描件或图片进行 OCR 文字识别，生成可搜索、可复制的 PDF 文档</p>
+
+    <!-- OCR not available notice -->
+    <div class="ocr-notice">
+      <div class="ocr-icon">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <circle cx="12" cy="12" r="10"/>
+          <line x1="12" y1="8" x2="12" y2="12"/>
+          <line x1="12" y1="16" x2="12.01" y2="16"/>
+        </svg>
+      </div>
+      <div class="ocr-text">
+        <h4>需要安装 Tesseract OCR 引擎</h4>
+        <p>扫描件 OCR 识别依赖 Tesseract OCR 引擎，请先安装后再使用此功能。</p>
+        <p class="ocr-cmd">
+          Windows: 下载安装
+          <a href="https://github.com/UB-Mannheim/tesseract/wiki" target="_blank">Tesseract for Windows</a>
+        </p>
+      </div>
+    </div>
+
+    <FileTable />
   </div>
 </template>
 
@@ -13,5 +34,37 @@
 .convert-page { max-width: 960px; }
 .page-title { font-size: 20px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px; }
 .page-desc { font-size: 13px; color: var(--text-secondary); margin-bottom: 24px; }
-.placeholder-area { background: #ffffff; border: 2px dashed var(--border-color); border-radius: var(--radius-md); padding: 60px 20px; text-align: center; color: var(--text-muted); }
+
+.ocr-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 20px;
+  background: #fff8e6;
+  border: 1px solid #f0d080;
+  border-radius: var(--radius-md);
+  margin-bottom: 24px;
+}
+.ocr-icon {
+  color: #e6a000;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.ocr-text h4 {
+  font-size: 14px;
+  font-weight: 600;
+  color: #8a6a00;
+  margin-bottom: 6px;
+}
+.ocr-text p {
+  font-size: 13px;
+  color: #8a6a00;
+  margin-bottom: 4px;
+}
+.ocr-cmd {
+  font-size: 12px !important;
+}
+.ocr-cmd a {
+  color: #4a6cf7;
+}
 </style>

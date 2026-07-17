@@ -54,8 +54,13 @@ SUPPORTED_TYPES: dict[str, str] = {
     "pdf-to-word": "pdf",
     "pdf-to-excel": "pdf",
     "pdf-to-ppt": "pdf",
+    "pdf-to-cad": "pdf",
     "cad-to-pdf": "dwg",
+    "caj-to-pdf": "caj",
+    "pdf-split": "pdf",
     "pdf-merge": "pdf",
+    "pdf-to-searchable": "pdf",
+    "pdf-scan-to-searchable": "pdf",
 }
 
 # ---- Models ----
@@ -81,6 +86,7 @@ async def convert(
     files: list[UploadFile] = File(...),
     convert_type: str = Form(default="pdf-to-word"),
     output_format: str = Form(default="docx"),
+    page_ranges: str = Form(default=""),
 ):
     """
     提交转换任务
@@ -89,6 +95,7 @@ async def convert(
         raise HTTPException(status_code=400, detail="未选择文件")
 
     task_ids = []
+    file_infos = []
 
     for file in files:
         if not file.filename:
@@ -103,26 +110,54 @@ async def convert(
         content = await file.read()
         upload_path.write_bytes(content)
 
-        # Create task record
+        file_infos.append({
+            "task_id": task_id,
+            "file_name": file.filename,
+            "upload_path": str(upload_path),
+        })
+
+    # For merge: create one task with all file paths
+    if convert_type == "pdf-merge":
+        task_id = secrets.token_urlsafe(16)
+        all_paths = [fi["upload_path"] for fi in file_infos]
+        all_names = ", ".join(fi["file_name"] for fi in file_infos)
         tasks[task_id] = {
             "task_id": task_id,
             "status": "pending",
-            "file_name": file.filename,
+            "file_name": all_names if len(all_names) < 60 else f"{len(all_names)} 个文件",
             "percent": 0,
-            "upload_path": str(upload_path),
+            "upload_path": all_paths[0] if all_paths else "",
+            "upload_paths": all_paths,
             "convert_type": convert_type,
             "output_format": output_format,
+            "page_ranges": page_ranges,
             "output_file": None,
             "message": "",
             "created_at": datetime.now().isoformat(),
         }
         task_ids.append(task_id)
+    else:
+        for fi in file_infos:
+            tasks[fi["task_id"]] = {
+                "task_id": fi["task_id"],
+                "status": "pending",
+                "file_name": fi["file_name"],
+                "percent": 0,
+                "upload_path": fi["upload_path"],
+                "convert_type": convert_type,
+                "output_format": output_format,
+                "page_ranges": page_ranges,
+                "output_file": None,
+                "message": "",
+                "created_at": datetime.now().isoformat(),
+            }
+            task_ids.append(fi["task_id"])
 
     # Start conversion in background
     for tid in task_ids:
         asyncio.create_task(run_conversion(tid))
 
-    return {"task_ids": task_ids, "message": f"已接收 {len(task_ids)} 个文件"}
+    return {"task_ids": task_ids, "message": f"已接收 {len(task_ids)} 个任务"}
 
 
 @app.get("/api/tasks/{task_id}")
@@ -217,22 +252,39 @@ def convert_pdf_to_docx(input_path: str, output_path: str) -> None:
     doc.save(output_path)
 
 
-def convert_pdf_split(input_path: str, output_dir: str) -> str:
-    """PDF 拆分：每页生成单独文件，打包为 zip"""
+def convert_pdf_split(input_path: str, output_dir: str, page_ranges: str = "") -> str:
+    """PDF 拆分：按页码范围拆分为独立文件，打包为 zip"""
     import zipfile
+    import re
 
     reader = PdfReader(input_path)
+    total_pages = len(reader.pages)
     stem = Path(input_path).stem
     zip_path = os.path.join(output_dir, f"{stem}_split.zip")
 
+    # Parse page ranges (1-indexed), e.g. "1-3, 5, 7-10"
+    pages_to_extract: list[int] = []
+    if page_ranges.strip():
+        for part in re.split(r'[,，]\s*', page_ranges.strip()):
+            part = part.strip()
+            if '-' in part:
+                a, b = part.split('-', 1)
+                pages_to_extract.extend(range(int(a.strip()), int(b.strip()) + 1))
+            else:
+                pages_to_extract.append(int(part))
+        # Filter valid pages
+        pages_to_extract = [p for p in pages_to_extract if 1 <= p <= total_pages]
+    else:
+        pages_to_extract = list(range(1, total_pages + 1))
+
     with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
-        for i, page in enumerate(reader.pages):
+        for page_num in pages_to_extract:
             writer = PdfWriter()
-            writer.add_page(page)
-            page_path = os.path.join(output_dir, f"{stem}_p{i + 1}.pdf")
+            writer.add_page(reader.pages[page_num - 1])
+            page_path = os.path.join(output_dir, f"{stem}_p{page_num}.pdf")
             with open(page_path, 'wb') as f:
                 writer.write(f)
-            zf.write(page_path, f"page_{i + 1}.pdf")
+            zf.write(page_path, f"page_{page_num}.pdf")
             os.remove(page_path)
 
     return zip_path
@@ -259,40 +311,63 @@ async def run_conversion(task_id: str):
         input_path = task["upload_path"]
         convert_type = task["convert_type"]
         output_format = task["output_format"]
+        page_ranges = task.get("page_ranges", "")
         output_name = Path(task["file_name"]).stem
         output_path = str(OUTPUT_DIR / f"{output_name}_{task_id}.{output_format}")
 
         task["percent"] = 20
 
-        # Try LibreOffice first, fall back to Python libraries
-        if find_libreoffice() and convert_type in ("pdf-to-word", "pdf-to-excel", "pdf-to-ppt"):
-            # LibreOffice handles these well
+        # ---- LibreOffice path (handles pdf-to-word/excel/ppt + cad/caj to pdf) ----
+        lo_types = ("pdf-to-word", "pdf-to-excel", "pdf-to-ppt", "cad-to-pdf", "caj-to-pdf",
+                    "pdf-to-cad", "pdf-to-searchable", "pdf-scan-to-searchable")
+        if find_libreoffice() and convert_type in lo_types:
             task["message"] = "使用 LibreOffice 引擎..."
+            task["percent"] = 30
             actual_output = await asyncio.to_thread(
                 convert_via_libreoffice, input_path, str(OUTPUT_DIR), output_format
             )
             if actual_output != output_path:
                 shutil.move(actual_output, output_path)
 
-        elif convert_type == "pdf-to-word":
+        # ---- Python engine path ----
+        elif convert_type in ("pdf-to-word", "pdf-to-excel", "pdf-to-ppt"):
             task["message"] = "使用 Python 引擎提取文本..."
             task["percent"] = 40
             await asyncio.to_thread(convert_pdf_to_docx, input_path, output_path)
+            # If converting to excel/ppt and LibreOffice not available, give useful output
+            if convert_type != "pdf-to-word":
+                task["message"] = "已提取文本内容（安装 LibreOffice 可获得更好的格式保留效果）"
 
         elif convert_type == "pdf-split":
             task["message"] = "拆分 PDF 页面..."
             task["percent"] = 40
-            zip_path = await asyncio.to_thread(convert_pdf_split, input_path, str(OUTPUT_DIR))
+            ext = "zip"
+            output_path = str(OUTPUT_DIR / f"{output_name}_{task_id}.{ext}")
+            zip_path = await asyncio.to_thread(convert_pdf_split, input_path, str(OUTPUT_DIR), page_ranges)
             output_path = zip_path
 
         elif convert_type == "pdf-merge":
             task["message"] = "合并 PDF..."
             task["percent"] = 40
-            # Merge needs all upload paths — for now handle single file
-            await asyncio.to_thread(convert_pdf_merge, [input_path], output_path)
+            all_paths = task.get("upload_paths", [input_path])
+            # Use stem from first file
+            first_name = all_paths[0] if all_paths else input_path
+            output_path = str(OUTPUT_DIR / f"merged_{task_id}.pdf")
+            await asyncio.to_thread(convert_pdf_merge, all_paths, output_path)
+
+        elif convert_type == "cad-to-pdf":
+            task["message"] = "CAD 转 PDF 需要 LibreOffice 引擎"
+            raise RuntimeError("需要安装 LibreOffice 才能转换 CAD 文件")
+
+        elif convert_type == "caj-to-pdf":
+            task["message"] = "CAJ 转 PDF 需要 LibreOffice 引擎"
+            raise RuntimeError("需要安装 LibreOffice 才能转换 CAJ 文件")
+
+        elif convert_type in ("pdf-to-searchable", "pdf-scan-to-searchable"):
+            task["message"] = "OCR 需要安装 Tesseract"
+            raise RuntimeError("需要安装 Tesseract OCR 引擎才能进行文字识别")
 
         else:
-            # Generic fallback: try Python-based text extraction for any format
             task["message"] = "使用 Python 引擎..."
             task["percent"] = 40
             await asyncio.to_thread(convert_pdf_to_docx, input_path, output_path)

@@ -7,6 +7,7 @@ import { uploadFiles, pollTask, type TaskInfo } from '@/api'
 const props = defineProps<{
   convertType: string
   outputFormat: string
+  pageRanges?: string
 }>()
 
 const emit = defineEmits<{
@@ -37,7 +38,7 @@ async function startConvert() {
   taskStore.setConverting(true)
 
   try {
-    const taskIds = await uploadFiles(rawFiles, props.convertType, props.outputFormat)
+    const taskIds = await uploadFiles(rawFiles, props.convertType, props.outputFormat, props.pageRanges)
 
     // Track all tasks
     const polls = taskIds.map(tid => {
@@ -52,7 +53,7 @@ async function startConvert() {
           fileName: info.file_name,
           percent: info.percent,
           status: info.status === 'done' ? 'done' : info.status === 'error' ? 'error' : 'processing',
-          message: info.message,
+          message: info.message ?? undefined,
         })
         emit('progress', info)
       })

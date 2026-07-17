@@ -12,12 +12,16 @@ export interface TaskInfo {
 export async function uploadFiles(
   files: File[],
   convertType: string,
-  outputFormat: string
+  outputFormat: string,
+  pageRanges?: string
 ): Promise<string[]> {
   const form = new FormData()
   files.forEach(f => form.append('files', f))
   form.append('convert_type', convertType)
   form.append('output_format', outputFormat)
+  if (pageRanges) {
+    form.append('page_ranges', pageRanges)
+  }
 
   const res = await fetch(`${BASE}/convert`, { method: 'POST', body: form })
   if (!res.ok) {
