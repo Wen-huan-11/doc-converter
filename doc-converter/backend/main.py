@@ -267,13 +267,20 @@ def convert_pdf_split(input_path: str, output_dir: str, page_ranges: str = "") -
     if page_ranges.strip():
         for part in re.split(r'[,，]\s*', page_ranges.strip()):
             part = part.strip()
-            if '-' in part:
-                a, b = part.split('-', 1)
-                pages_to_extract.extend(range(int(a.strip()), int(b.strip()) + 1))
-            else:
-                pages_to_extract.append(int(part))
+            if not part:
+                continue
+            try:
+                if '-' in part:
+                    a, b = part.split('-', 1)
+                    pages_to_extract.extend(range(int(a.strip()), int(b.strip()) + 1))
+                else:
+                    pages_to_extract.append(int(part))
+            except ValueError:
+                raise ValueError(f"无效的页码范围: '{part}'，请输入如 1-3, 5, 7-10 的格式")
         # Filter valid pages
         pages_to_extract = [p for p in pages_to_extract if 1 <= p <= total_pages]
+        if not pages_to_extract:
+            raise ValueError(f"页码范围 {page_ranges} 不在有效范围内（1-{total_pages}）")
     else:
         pages_to_extract = list(range(1, total_pages + 1))
 
@@ -333,10 +340,13 @@ async def run_conversion(task_id: str):
         elif convert_type in ("pdf-to-word", "pdf-to-excel", "pdf-to-ppt"):
             task["message"] = "使用 Python 引擎提取文本..."
             task["percent"] = 40
-            await asyncio.to_thread(convert_pdf_to_docx, input_path, output_path)
-            # If converting to excel/ppt and LibreOffice not available, give useful output
+            # Non-word types: force .docx since convert_pdf_to_docx outputs DOCX content
             if convert_type != "pdf-to-word":
+                output_format = "docx"
+                output_path = str(OUTPUT_DIR / f"{output_name}_{task_id}.docx")
+                task["output_format"] = "docx"
                 task["message"] = "已提取文本内容（安装 LibreOffice 可获得更好的格式保留效果）"
+            await asyncio.to_thread(convert_pdf_to_docx, input_path, output_path)
 
         elif convert_type == "pdf-split":
             task["message"] = "拆分 PDF 页面..."
@@ -378,6 +388,11 @@ async def run_conversion(task_id: str):
         task["percent"] = 100
         task["message"] = "转换完成"
 
+    except ValueError as e:
+        task["status"] = "error"
+        task["message"] = str(e)
+        task["percent"] = 0
+        logger.error(f"Task {task_id} validation error: {e}")
     except Exception as e:
         task["status"] = "error"
         task["message"] = "转换失败，请重试"
