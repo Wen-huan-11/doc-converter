@@ -233,7 +233,19 @@ def convert_via_libreoffice(input_path: str, output_dir: str, output_format: str
 
 
 def convert_pdf_to_docx(input_path: str, output_path: str) -> None:
-    """PDF → Word: 提取文本并生成 DOCX"""
+    """PDF → Word: 优先使用 pdf2docx 保留格式，fallback 到文本提取"""
+    try:
+        from pdf2docx import Converter
+        cv = Converter(input_path)
+        cv.convert(output_path)
+        cv.close()
+        return
+    except ImportError:
+        pass  # pdf2docx not installed, use fallback
+    except Exception as e:
+        logger.warning(f"pdf2docx failed, falling back to text extraction: {e}")
+
+    # Fallback: plain text extraction via PyPDF2
     reader = PdfReader(input_path)
     doc = Document()
 
@@ -244,7 +256,6 @@ def convert_pdf_to_docx(input_path: str, output_path: str) -> None:
                 doc.add_page_break()
             doc.add_paragraph(text.strip())
 
-    # If no text extracted, add a note
     if not doc.paragraphs or all(not p.text.strip() for p in doc.paragraphs):
         doc.add_paragraph(f"[从 PDF 提取了 {len(reader.pages)} 页，但未检测到文本内容。")
         doc.add_paragraph("如果是扫描件，请使用 OCR 功能。]")

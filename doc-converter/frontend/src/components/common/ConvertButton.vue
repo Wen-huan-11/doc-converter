@@ -59,7 +59,14 @@ async function startConvert() {
       })
     })
 
-    await Promise.allSettled(polls)
+    const results = await Promise.allSettled(polls)
+    for (const r of results) {
+      if (r.status === 'fulfilled') {
+        emit('complete', r.value)
+      } else {
+        emit('error', r.reason?.message || '转换失败')
+      }
+    }
   } catch (e: any) {
     emit('error', e.message || '转换失败')
   } finally {
